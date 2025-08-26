@@ -259,21 +259,30 @@ async def get_current_user(
         updated_at=user.updated_at
     )
 
-async def get_current_active_user(request: Request, db: AsyncIOMotorDatabase = None) -> User:
+async def get_current_active_user(
+    request: Request,
+    db: AsyncIOMotorDatabase = Depends(get_database)
+) -> User:
     """Get current active user."""
     current_user = await get_current_user_from_cookie_or_header(request, None, db)
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
 
-def require_admin(current_user: User = Depends(get_current_active_user)) -> User:
+def require_admin(
+    request: Request,
+    db: AsyncIOMotorDatabase = Depends(get_database)
+) -> User:
     """Require admin role."""
-    if current_user.role != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required"
-        )
-    return current_user
+    async def _require_admin():
+        current_user = await get_current_user_from_cookie_or_header(request, None, db)
+        if current_user.role != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin access required"
+            )
+        return current_user
+    return _require_admin
 
 def set_session_cookie(response: Response, session_token: str):
     """Set secure session cookie."""
