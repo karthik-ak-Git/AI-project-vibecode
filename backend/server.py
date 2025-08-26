@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Request, Response
 from fastapi.security import HTTPBearer
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -6,7 +6,7 @@ from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 import os
 import logging
 from pathlib import Path
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone
 from typing import List, Dict, Any, Optional
 import asyncio
 import time
@@ -15,7 +15,12 @@ import time
 from models import *
 from auth import *
 from ai_service import AIService
-from database import connect_to_mongo, close_mongo_connection, get_database, get_user_projects, get_project_by_id
+from database import (
+    connect_to_mongo, close_mongo_connection, get_database, get_user_projects, get_project_by_id,
+    create_mcp_task, get_mcp_tasks, get_mcp_task_by_id, update_mcp_task, delete_mcp_task,
+    create_linkedin_post, get_linkedin_posts, update_linkedin_post,
+    get_admin_stats, get_all_users
+)
 from utils import *
 
 ROOT_DIR = Path(__file__).parent
@@ -30,9 +35,9 @@ logger = logging.getLogger(__name__)
 
 # Create the main app
 app = FastAPI(
-    title="Multi-Agent App Generator API",
-    description="Advanced multi-agent platform for generating web applications with AI",
-    version="2.0.0"
+    title="Multi-Agent App Generator API with Admin Features",
+    description="Advanced multi-agent platform for generating web applications with AI and admin MCP management",
+    version="3.0.0"
 )
 
 # Create API router
@@ -87,19 +92,56 @@ AGENTS = [
     }
 ]
 
+# MCP Task Types
+MCP_TASK_TYPES = [
+    {
+        "id": "linkedin_post",
+        "name": "LinkedIn Post Automation",
+        "description": "Create and schedule LinkedIn posts with content generation",
+        "parameters_schema": {
+            "content": {"type": "string", "required": True},
+            "schedule": {"type": "object", "required": False},
+            "media_urls": {"type": "array", "required": False},
+            "hashtags": {"type": "array", "required": False}
+        }
+    },
+    {
+        "id": "email_campaign",
+        "name": "Email Campaign",
+        "description": "Create and manage email marketing campaigns",
+        "parameters_schema": {
+            "subject": {"type": "string", "required": True},
+            "content": {"type": "string", "required": True},
+            "recipients": {"type": "array", "required": True},
+            "schedule": {"type": "object", "required": False}
+        }
+    },
+    {
+        "id": "social_media_post",
+        "name": "Social Media Post",
+        "description": "Cross-platform social media posting automation",
+        "parameters_schema": {
+            "platforms": {"type": "array", "required": True},
+            "content": {"type": "string", "required": True},
+            "media_urls": {"type": "array", "required": False},
+            "schedule": {"type": "object", "required": False}
+        }
+    }
+]
+
 # Dependencies
 async def get_db() -> AsyncIOMotorDatabase:
     """Get database dependency"""
     return await get_database()
 
 async def get_current_user_with_db(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request,
     db: AsyncIOMotorDatabase = Depends(get_db)
 ) -> User:
     """Get current user with database dependency"""
-    return await get_current_user(credentials, db)
+    return await get_current_user_from_cookie_or_header(request, None, db)
 
-# Authentication Routes
+# Enhanced Authentication Routes
 @api_router.post("/auth/register", response_model=APIResponse)
 async def register_user(
     user_data: UserCreate,
@@ -138,12 +180,16 @@ async def register_user(
                 detail="Username already taken"
             )
         
+        # Determine role based on email
+        role = "admin" if is_admin_email(user_data.email) else "user"
+        
         # Create new user
         hashed_password = get_password_hash(user_data.password)
         user_in_db = UserInDB(
             email=user_data.email,
             username=user_data.username,
             full_name=user_data.full_name,
+            role=role,
             hashed_password=hashed_password
         )
         
@@ -151,12 +197,16 @@ async def register_user(
         user_dict = prepare_for_mongo(user_in_db.dict())
         await db.users.insert_one(user_dict)
         
-        logger.info(f"New user registered: {user_data.email}")
+        logger.info(f"New user registered: {user_data.email} as {role}")
         
         return APIResponse(
             success=True,
             message="User registered successfully",
-            data={"user_id": user_in_db.id, "email": user_in_db.email}
+            data={
+                "user_id": user_in_db.id, 
+                "email": user_in_db.email,
+                "role": role
+            }
         )
         
     except HTTPException:
@@ -168,9 +218,10 @@ async def register_user(
 @api_router.post("/auth/login", response_model=Token)
 async def login_user(
     user_credentials: UserLogin,
+    response: Response,
     db: AsyncIOMotorDatabase = Depends(get_db)
 ):
-    """Authenticate user and return JWT token"""
+    """Authenticate user and return JWT token + session cookie"""
     try:
         user = await authenticate_user(db, user_credentials.email, user_credentials.password)
         if not user:
@@ -180,13 +231,31 @@ async def login_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
         
-        # Create access token
+        # Create session token for cookie-based auth
+        session_token = generate_session_token()
+        session_expires = datetime.now(timezone.utc) + timedelta(days=7)
+        
+        # Update user with session token
+        await db.users.update_one(
+            {"email": user.email},
+            {
+                "$set": {
+                    "session_token": session_token,
+                    "session_expires": session_expires.isoformat()
+                }
+            }
+        )
+        
+        # Set secure session cookie
+        set_session_cookie(response, session_token)
+        
+        # Create JWT access token (for backward compatibility)
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(
             data={"sub": user.email}, expires_delta=access_token_expires
         )
         
-        logger.info(f"User logged in: {user.email}")
+        logger.info(f"User logged in: {user.email} (Role: {user.role})")
         
         return Token(access_token=access_token, token_type="bearer")
         
@@ -196,10 +265,104 @@ async def login_user(
         logger.error(f"Login failed: {str(e)}")
         raise HTTPException(status_code=500, detail="Login failed")
 
-@api_router.get("/auth/me", response_model=User)
+@api_router.post("/auth/oauth/callback", response_model=APIResponse)
+async def oauth_callback(
+    request: Request,
+    response: Response,
+    db: AsyncIOMotorDatabase = Depends(get_db)
+):
+    """Handle Emergent OAuth callback"""
+    try:
+        # Get session ID from request
+        data = await request.json()
+        session_id = data.get("session_id")
+        
+        if not session_id:
+            raise HTTPException(status_code=400, detail="Session ID required")
+        
+        # Authenticate with Emergent OAuth
+        oauth_data = await authenticate_with_emergent_oauth(session_id)
+        if not oauth_data:
+            raise HTTPException(status_code=401, detail="OAuth authentication failed")
+        
+        # Create or update user
+        user = await create_or_update_oauth_user(db, oauth_data)
+        
+        # Set secure session cookie
+        set_session_cookie(response, user.session_token)
+        
+        logger.info(f"OAuth login successful: {user.email} (Role: {user.role})")
+        
+        return APIResponse(
+            success=True,
+            message="OAuth authentication successful",
+            data={
+                "user_id": user.id,
+                "email": user.email,
+                "role": user.role,
+                "username": user.username,
+                "full_name": user.full_name,
+                "profile_picture": user.profile_picture
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"OAuth callback failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="OAuth authentication failed")
+
+@api_router.post("/auth/logout", response_model=APIResponse)
+async def logout_user(
+    request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user_with_db),
+    db: AsyncIOMotorDatabase = Depends(get_db)
+):
+    """Logout user and clear session"""
+    try:
+        # Clear session token from database
+        await db.users.update_one(
+            {"id": current_user.id},
+            {
+                "$unset": {
+                    "session_token": "",
+                    "session_expires": ""
+                }
+            }
+        )
+        
+        # Clear session cookie
+        clear_session_cookie(response)
+        
+        logger.info(f"User logged out: {current_user.email}")
+        
+        return APIResponse(
+            success=True,
+            message="Logged out successfully"
+        )
+        
+    except Exception as e:
+        logger.error(f"Logout failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Logout failed")
+
+@api_router.get("/auth/me", response_model=APIResponse)
 async def read_users_me(current_user: User = Depends(get_current_user_with_db)):
     """Get current user information"""
-    return current_user
+    return APIResponse(
+        success=True,
+        message="User information retrieved",
+        data={
+            "id": current_user.id,
+            "email": current_user.email,
+            "username": current_user.username,
+            "full_name": current_user.full_name,
+            "role": current_user.role,
+            "profile_picture": current_user.profile_picture,
+            "is_active": current_user.is_active,
+            "created_at": current_user.created_at.isoformat() if current_user.created_at else None
+        }
+    )
 
 # Enhanced Project Generation Routes
 @api_router.post("/generate", response_model=APIResponse)
@@ -208,15 +371,18 @@ async def generate_app(
     current_user: User = Depends(get_current_user_with_db),
     db: AsyncIOMotorDatabase = Depends(get_db)
 ):
-    """Enhanced app generation with real AI analysis"""
+    """Enhanced app generation with role-based priority"""
     if not request.prompt.strip():
         raise HTTPException(status_code=400, detail="Prompt cannot be empty")
     
     try:
         start_time = time.time()
         
+        # Set priority based on user role
+        priority = request.priority if current_user.role == "admin" else "normal"
+        
         # Step 1: AI-powered analysis of the prompt
-        logger.info(f"Starting AI analysis for user {current_user.id}")
+        logger.info(f"Starting AI analysis for user {current_user.id} (Role: {current_user.role})")
         ai_analysis = await ai_service.analyze_project_requirements(request.prompt, "comprehensive")
         
         if not ai_analysis["success"]:
@@ -239,7 +405,9 @@ async def generate_app(
                 context={
                     "technologies": technologies,
                     "complexity": complexity,
-                    "ai_analysis": ai_analysis["result"]
+                    "ai_analysis": ai_analysis["result"],
+                    "user_role": current_user.role,
+                    "priority": priority
                 }
             )
             
@@ -258,6 +426,7 @@ async def generate_app(
             structure=project_structure,
             technologies=technologies,
             agents_results=agents_results,
+            priority=priority,
             ai_analysis={
                 "complexity": complexity,
                 "time_estimates": time_estimates,
@@ -272,7 +441,7 @@ async def generate_app(
         
         total_time = time.time() - start_time
         
-        logger.info(f"Project generated successfully for user {current_user.id} in {total_time:.2f}s")
+        logger.info(f"Project generated successfully for user {current_user.id} in {total_time:.2f}s (Priority: {priority})")
         
         return APIResponse(
             success=True,
@@ -280,7 +449,8 @@ async def generate_app(
             data={
                 "project": project.dict(),
                 "generation_time": total_time,
-                "ai_powered": True
+                "ai_powered": True,
+                "priority": priority
             }
         )
         
@@ -368,7 +538,7 @@ async def analyze_with_ai(
         raise HTTPException(status_code=500, detail=f"AI analysis failed: {str(e)}")
 
 # Enhanced Project Management Routes
-@api_router.get("/projects", response_model=List[Dict[str, Any]])
+@api_router.get("/projects", response_model=APIResponse)
 async def get_user_projects_endpoint(
     current_user: User = Depends(get_current_user_with_db),
     limit: int = 50,
@@ -377,12 +547,16 @@ async def get_user_projects_endpoint(
     """Get user's projects with pagination"""
     try:
         projects = await get_user_projects(current_user.id, limit, skip)
-        return projects
+        return APIResponse(
+            success=True,
+            message="Projects retrieved successfully",
+            data={"projects": projects}
+        )
     except Exception as e:
         logger.error(f"Failed to fetch user projects: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to fetch projects")
 
-@api_router.get("/projects/{project_id}")
+@api_router.get("/projects/{project_id}", response_model=APIResponse)
 async def get_project_endpoint(
     project_id: str,
     current_user: User = Depends(get_current_user_with_db)
@@ -392,7 +566,11 @@ async def get_project_endpoint(
         project = await get_project_by_id(project_id, current_user.id)
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
-        return project
+        return APIResponse(
+            success=True,
+            message="Project retrieved successfully",
+            data={"project": project}
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -413,8 +591,12 @@ async def update_project(
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
         
-        # Prepare update data
+        # Admin can set higher priorities
         update_dict = {k: v for k, v in update_data.dict().items() if v is not None}
+        if "priority" in update_dict and current_user.role != "admin":
+            if update_dict["priority"] in ["high", "urgent"]:
+                update_dict["priority"] = "normal"  # Non-admin users limited to normal priority
+        
         update_dict["updated_at"] = datetime.now(timezone.utc).isoformat()
         
         # Update in database
@@ -484,7 +666,8 @@ async def export_project(
                 "description": project["description"],
                 "created_at": project["created_at"],
                 "complexity": project.get("ai_analysis", {}).get("complexity", "medium"),
-                "estimated_time": project.get("ai_analysis", {}).get("time_estimates", {})
+                "estimated_time": project.get("ai_analysis", {}).get("time_estimates", {}),
+                "priority": project.get("priority", "normal")
             },
             "structure": project["structure"],
             "technologies": project["technologies"],
@@ -509,261 +692,241 @@ async def export_project(
         logger.error(f"Project export failed: {str(e)}")
         raise HTTPException(status_code=500, detail="Project export failed")
 
-def generate_setup_instructions(project: Dict[str, Any]) -> List[str]:
-    """Generate detailed setup instructions"""
-    instructions = [
-        "# Project Setup Instructions",
-        "",
-        "## Prerequisites",
-        "- Node.js 18+ and npm/yarn",
-        "- Python 3.11+",
-        "- MongoDB 5.0+",
-        "",
-        "## Backend Setup",
-        "1. Navigate to the backend directory",
-        "2. Create a virtual environment: `python -m venv venv`",
-        "3. Activate virtual environment:",
-        "   - Windows: `venv\\Scripts\\activate`",
-        "   - macOS/Linux: `source venv/bin/activate`",
-        "4. Install dependencies: `pip install -r requirements.txt`",
-        "5. Copy `.env.example` to `.env` and configure variables",
-        "6. Start the server: `uvicorn main:app --reload`",
-        "",
-        "## Frontend Setup",
-        "1. Navigate to the frontend directory",
-        "2. Install dependencies: `npm install`",
-        "3. Copy `.env.example` to `.env` and configure variables",
-        "4. Start development server: `npm run dev`",
-        "",
-        "## Database Setup",
-        "1. Install MongoDB locally or use MongoDB Atlas",
-        "2. Create database and configure connection string",
-        "3. Run database migrations if applicable",
-        "",
-        "## Environment Variables",
-        "Configure the following environment variables:",
-    ]
-    
-    # Add technology-specific instructions
-    technologies = project.get("technologies", [])
-    
-    if "JWT Authentication" in technologies:
-        instructions.extend([
-            "- JWT_SECRET_KEY: Generate a secure secret key",
-            "- JWT_ALGORITHM: HS256 (recommended)",
-            "- JWT_ACCESS_TOKEN_EXPIRE_MINUTES: 30 (or desired duration)"
-        ])
-    
-    if "Gemini API" in technologies:
-        instructions.extend([
-            "- GEMINI_API_KEY: Your Google Gemini API key",
-            "- AI_MODEL: gemini-2.0-flash (or preferred model)"
-        ])
-    
-    if "Stripe API" in technologies:
-        instructions.extend([
-            "- STRIPE_PUBLIC_KEY: Your Stripe publishable key",
-            "- STRIPE_SECRET_KEY: Your Stripe secret key"
-        ])
-    
-    instructions.extend([
-        "",
-        "## Running the Application",
-        "1. Start MongoDB service",
-        "2. Start the backend server (port 8000)",
-        "3. Start the frontend development server (port 3000)",
-        "4. Access the application at http://localhost:3000"
-    ])
-    
-    return instructions
+# ADMIN-ONLY ROUTES
+@api_router.get("/admin/stats", response_model=APIResponse)
+async def get_admin_dashboard_stats(
+    current_user: User = Depends(require_admin)
+):
+    """Get admin dashboard statistics"""
+    try:
+        stats = await get_admin_stats()
+        return APIResponse(
+            success=True,
+            message="Admin stats retrieved successfully",
+            data=stats
+        )
+    except Exception as e:
+        logger.error(f"Failed to get admin stats: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get admin stats")
 
-def generate_deployment_guide(project: Dict[str, Any]) -> List[str]:
-    """Generate deployment guide"""
-    return [
-        "# Deployment Guide",
-        "",
-        "## Production Deployment Options",
-        "",
-        "### Option 1: Docker Deployment",
-        "1. Build Docker images: `docker-compose build`",
-        "2. Start services: `docker-compose up -d`",
-        "3. Configure reverse proxy (nginx)",
-        "",
-        "### Option 2: Cloud Deployment",
-        "- **Frontend**: Deploy to Vercel, Netlify, or AWS S3+CloudFront",
-        "- **Backend**: Deploy to AWS EC2, Google Cloud Run, or Railway",
-        "- **Database**: Use MongoDB Atlas or AWS DocumentDB",
-        "",
-        "### Option 3: VPS Deployment",
-        "1. Set up Ubuntu 20.04+ VPS",
-        "2. Install Node.js, Python, MongoDB",
-        "3. Configure nginx as reverse proxy",
-        "4. Set up SSL certificates with Let's Encrypt",
-        "5. Configure PM2 for process management",
-        "",
-        "## Environment Configuration",
-        "- Set NODE_ENV=production",
-        "- Configure production database URLs",
-        "- Set secure JWT secrets",
-        "- Enable HTTPS in production",
-        "",
-        "## Security Considerations",
-        "- Use environment variables for all secrets",
-        "- Enable CORS for specific domains only",
-        "- Implement rate limiting",
-        "- Regular security updates"
-    ]
+@api_router.get("/admin/users", response_model=APIResponse)
+async def get_all_users_admin(
+    current_user: User = Depends(require_admin),
+    limit: int = 50,
+    skip: int = 0
+):
+    """Get all users for admin management"""
+    try:
+        result = await get_all_users(limit, skip)
+        return APIResponse(
+            success=True,
+            message="Users retrieved successfully",
+            data=result
+        )
+    except Exception as e:
+        logger.error(f"Failed to get users: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get users")
 
-def generate_development_roadmap(project: Dict[str, Any]) -> Dict[str, List[str]]:
-    """Generate development roadmap"""
-    complexity = project.get("ai_analysis", {}).get("complexity", "medium")
-    
-    roadmaps = {
-        "simple": {
-            "Phase 1 (Week 1-2)": [
-                "Set up project structure",
-                "Implement basic authentication",
-                "Create core components",
-                "Set up database schema"
-            ],
-            "Phase 2 (Week 3-4)": [
-                "Implement main features",
-                "Add basic testing",
-                "Style with Tailwind CSS",
-                "Deploy to staging"
-            ],
-            "Phase 3 (Week 5-6)": [
-                "Add advanced features",
-                "Comprehensive testing",
-                "Performance optimization",
-                "Production deployment"
-            ]
-        },
-        "medium": {
-            "Phase 1 (Week 1-3)": [
-                "Project setup and architecture",
-                "Authentication system",
-                "Database design and setup",
-                "Core API endpoints"
-            ],
-            "Phase 2 (Week 4-6)": [
-                "Frontend components development",
-                "State management implementation",
-                "API integration",
-                "Basic testing setup"
-            ],
-            "Phase 3 (Week 7-9)": [
-                "Advanced features implementation",
-                "Real-time functionality",
-                "Comprehensive testing",
-                "Security hardening"
-            ],
-            "Phase 4 (Week 10-12)": [
-                "Performance optimization",
-                "Documentation completion",
-                "Deployment pipeline",
-                "Production launch"
-            ]
-        },
-        "complex": {
-            "Phase 1 (Week 1-4)": [
-                "Architecture design and setup",
-                "Core infrastructure",
-                "Authentication and authorization",
-                "Database architecture"
-            ],
-            "Phase 2 (Week 5-8)": [
-                "Core feature development",
-                "API development",
-                "Frontend architecture",
-                "Integration testing"
-            ],
-            "Phase 3 (Week 9-12)": [
-                "Advanced features",
-                "AI integration",
-                "Real-time features",
-                "Performance optimization"
-            ],
-            "Phase 4 (Week 13-16)": [
-                "Security implementation",
-                "Comprehensive testing",
-                "Documentation",
-                "Deployment and monitoring"
-            ]
-        }
-    }
-    
-    return roadmaps.get(complexity, roadmaps["medium"])
+# MCP Task Management Routes (Admin Only)
+@api_router.post("/admin/mcp/tasks", response_model=APIResponse)
+async def create_mcp_task_endpoint(
+    task_data: MCPTaskCreate,
+    current_user: User = Depends(require_admin),
+    db: AsyncIOMotorDatabase = Depends(get_db)
+):
+    """Create a new MCP task (Admin only)"""
+    try:
+        mcp_task = MCPTask(
+            created_by=current_user.id,
+            task_type=task_data.task_type,
+            name=task_data.name,
+            description=task_data.description,
+            parameters=task_data.parameters,
+            schedule=task_data.schedule
+        )
+        
+        task_dict = prepare_for_mongo(mcp_task.dict())
+        task_id = await create_mcp_task(task_dict)
+        
+        logger.info(f"MCP task created by admin {current_user.email}: {task_data.name}")
+        
+        return APIResponse(
+            success=True,
+            message="MCP task created successfully",
+            data={"task_id": mcp_task.id, "task": mcp_task.dict()}
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to create MCP task: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to create MCP task")
 
-def generate_best_practices(technologies: List[str]) -> Dict[str, List[str]]:
-    """Generate best practices for the technology stack"""
-    practices = {
-        "General": [
-            "Follow consistent coding standards",
-            "Use version control effectively (Git)",
-            "Write comprehensive documentation",
-            "Implement proper error handling",
-            "Use environment variables for configuration"
-        ],
-        "React": [
-            "Use functional components with hooks",
-            "Implement proper state management",
-            "Optimize component re-renders",
-            "Use React.memo for expensive components",
-            "Follow component composition patterns"
-        ],
-        "FastAPI": [
-            "Use Pydantic models for validation",
-            "Implement proper dependency injection",
-            "Use async/await for database operations",
-            "Add comprehensive API documentation",
-            "Implement proper logging"
-        ],
-        "MongoDB": [
-            "Design schema with proper relationships",
-            "Create appropriate indexes",
-            "Use aggregation pipelines efficiently",
-            "Implement proper data validation",
-            "Regular backup and monitoring"
-        ]
-    }
-    
-    # Add technology-specific practices
-    if "JWT Authentication" in technologies:
-        practices["Security"] = [
-            "Use secure JWT secret keys",
-            "Implement token refresh mechanism",
-            "Add proper token validation",
-            "Use HTTPS in production",
-            "Implement rate limiting"
-        ]
-    
-    return practices
+@api_router.get("/admin/mcp/tasks", response_model=APIResponse)
+async def get_mcp_tasks_endpoint(
+    current_user: User = Depends(require_admin),
+    status: Optional[str] = None,
+    limit: int = 50,
+    skip: int = 0
+):
+    """Get MCP tasks (Admin only)"""
+    try:
+        tasks = await get_mcp_tasks(current_user.id, status, limit, skip)
+        return APIResponse(
+            success=True,
+            message="MCP tasks retrieved successfully",
+            data={"tasks": tasks}
+        )
+    except Exception as e:
+        logger.error(f"Failed to get MCP tasks: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get MCP tasks")
 
-def generate_environment_config(project: Dict[str, Any]) -> Dict[str, Dict[str, str]]:
-    """Generate environment configuration templates"""
-    return {
-        "backend": {
-            "MONGO_URL": "mongodb://localhost:27017",
-            "DB_NAME": "your_app_db",
-            "JWT_SECRET_KEY": "your-super-secret-jwt-key-here",
-            "JWT_ALGORITHM": "HS256",
-            "JWT_ACCESS_TOKEN_EXPIRE_MINUTES": "30",
-            "CORS_ORIGINS": "http://localhost:3000",
-            "LOG_LEVEL": "INFO"
-        },
-        "frontend": {
-            "REACT_APP_API_URL": "http://localhost:8000/api",
-            "REACT_APP_APP_NAME": project.get("name", "My App"),
-            "REACT_APP_ENVIRONMENT": "development"
-        }
-    }
+@api_router.get("/admin/mcp/tasks/{task_id}", response_model=APIResponse)
+async def get_mcp_task_endpoint(
+    task_id: str,
+    current_user: User = Depends(require_admin)
+):
+    """Get specific MCP task (Admin only)"""
+    try:
+        task = await get_mcp_task_by_id(task_id, current_user.id)
+        if not task:
+            raise HTTPException(status_code=404, detail="MCP task not found")
+        
+        return APIResponse(
+            success=True,
+            message="MCP task retrieved successfully",
+            data={"task": task}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get MCP task: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get MCP task")
+
+@api_router.put("/admin/mcp/tasks/{task_id}", response_model=APIResponse)
+async def update_mcp_task_endpoint(
+    task_id: str,
+    update_data: MCPTaskUpdate,
+    current_user: User = Depends(require_admin)
+):
+    """Update MCP task (Admin only)"""
+    try:
+        update_dict = {k: v for k, v in update_data.dict().items() if v is not None}
+        
+        success = await update_mcp_task(task_id, update_dict, current_user.id)
+        if not success:
+            raise HTTPException(status_code=404, detail="MCP task not found")
+        
+        return APIResponse(
+            success=True,
+            message="MCP task updated successfully",
+            data={"task_id": task_id, "updated_fields": list(update_dict.keys())}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update MCP task: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to update MCP task")
+
+@api_router.delete("/admin/mcp/tasks/{task_id}", response_model=APIResponse)
+async def delete_mcp_task_endpoint(
+    task_id: str,
+    current_user: User = Depends(require_admin)
+):
+    """Delete MCP task (Admin only)"""
+    try:
+        success = await delete_mcp_task(task_id, current_user.id)
+        if not success:
+            raise HTTPException(status_code=404, detail="MCP task not found")
+        
+        return APIResponse(
+            success=True,
+            message="MCP task deleted successfully",
+            data={"task_id": task_id}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete MCP task: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to delete MCP task")
+
+@api_router.get("/admin/mcp/task-types", response_model=APIResponse)
+async def get_mcp_task_types(
+    current_user: User = Depends(require_admin)
+):
+    """Get available MCP task types (Admin only)"""
+    return APIResponse(
+        success=True,
+        message="MCP task types retrieved successfully",
+        data={"task_types": MCP_TASK_TYPES}
+    )
+
+# LinkedIn Post Management Routes (Admin Only)
+@api_router.post("/admin/linkedin/posts", response_model=APIResponse)
+async def create_linkedin_post_endpoint(
+    mcp_task_id: str,
+    post_data: LinkedInPostCreate,
+    current_user: User = Depends(require_admin)
+):
+    """Create LinkedIn post for MCP task (Admin only)"""
+    try:
+        # Verify MCP task exists and belongs to admin
+        task = await get_mcp_task_by_id(mcp_task_id, current_user.id)
+        if not task:
+            raise HTTPException(status_code=404, detail="MCP task not found")
+        
+        linkedin_post = LinkedInPost(
+            mcp_task_id=mcp_task_id,
+            content=post_data.content,
+            media_urls=post_data.media_urls,
+            scheduled_for=post_data.scheduled_for
+        )
+        
+        post_dict = prepare_for_mongo(linkedin_post.dict())
+        post_id = await create_linkedin_post(post_dict)
+        
+        logger.info(f"LinkedIn post created by admin {current_user.email} for task {mcp_task_id}")
+        
+        return APIResponse(
+            success=True,
+            message="LinkedIn post created successfully",
+            data={"post_id": linkedin_post.id, "post": linkedin_post.dict()}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create LinkedIn post: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to create LinkedIn post")
+
+@api_router.get("/admin/linkedin/posts", response_model=APIResponse)
+async def get_linkedin_posts_endpoint(
+    current_user: User = Depends(require_admin),
+    mcp_task_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 50
+):
+    """Get LinkedIn posts (Admin only)"""
+    try:
+        posts = await get_linkedin_posts(mcp_task_id, status, limit)
+        return APIResponse(
+            success=True,
+            message="LinkedIn posts retrieved successfully",
+            data={"posts": posts}
+        )
+    except Exception as e:
+        logger.error(f"Failed to get LinkedIn posts: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get LinkedIn posts")
 
 # System and Agent Information Routes
 @api_router.get("/agents")
 async def get_agents():
     """Get list of available agents with enhanced information"""
-    return {"agents": AGENTS}
+    return APIResponse(
+        success=True,
+        message="Agents retrieved successfully",
+        data={"agents": AGENTS}
+    )
 
 @api_router.get("/system/status")
 async def system_status():
@@ -783,18 +946,27 @@ async def system_status():
     except:
         ai_status = "unhealthy"
     
-    return {
-        "status": "healthy",
-        "database": db_status,
-        "ai_service": ai_status,
-        "version": "2.0.0",
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
+    return APIResponse(
+        success=True,
+        message="System status retrieved",
+        data={
+            "status": "healthy",
+            "database": db_status,
+            "ai_service": ai_status,
+            "version": "3.0.0",
+            "features": ["multi_agent_generation", "admin_mcp_management", "oauth_auth"],
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    )
 
 # Legacy routes for compatibility
 @api_router.get("/")
 async def root():
-    return {"message": "Multi-Agent App Generator API v2.0", "status": "operational"}
+    return APIResponse(
+        success=True,
+        message="Multi-Agent App Generator API v3.0 with Admin Features",
+        data={"status": "operational", "version": "3.0.0"}
+    )
 
 @api_router.post("/status", response_model=StatusCheck)
 async def create_status_check(input: StatusCheckCreate):
@@ -822,7 +994,7 @@ app.add_middleware(
 async def startup_event():
     """Initialize database connection and services"""
     await connect_to_mongo()
-    logger.info("Multi-Agent App Generator API v2.0 started successfully")
+    logger.info("Multi-Agent App Generator API v3.0 with Admin Features started successfully")
 
 @app.on_event("shutdown")
 async def shutdown_event():
