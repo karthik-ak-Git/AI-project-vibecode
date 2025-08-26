@@ -10,6 +10,7 @@ import requests
 import secrets
 from dotenv import load_dotenv
 from models import User, UserInDB, EmergentAuthResponse
+from database import get_database
 
 load_dotenv()
 
