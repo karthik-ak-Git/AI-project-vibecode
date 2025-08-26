@@ -145,6 +145,7 @@ const Home = () => {
     
     setIsGenerating(true);
     setCurrentStep(0);
+    setGeneratedProject(null);
     
     try {
       // Reset all agent statuses
@@ -159,35 +160,53 @@ const Home = () => {
       });
       setAgentStatuses(resetStatuses);
 
-      // Execute agents sequentially with some overlap
-      for (let i = 0; i < agents.length; i++) {
-        setCurrentStep(i + 1);
-        await simulateAgentExecution(agents[i].id, 1500);
-        
-        // Allow some overlap for parallel execution feel
-        if (i < agents.length - 1) {
-          setTimeout(() => {
-            // This creates a staggered start effect
-          }, 500);
-        }
-      }
-
-      // Generate final project structure
-      setGeneratedProject({
-        name: extractProjectName(prompt),
-        description: prompt,
-        structure: {
-          frontend: ['src/App.js', 'src/components/', 'src/pages/', 'public/'],
-          backend: ['server.py', 'models/', 'routes/', 'requirements.txt'],
-          database: ['schemas/', 'migrations/', 'seeds/'],
-          config: ['.env', 'package.json', 'tailwind.config.js'],
-          tests: ['tests/unit/', 'tests/integration/', 'tests/e2e/']
-        },
-        technologies: ['React', 'FastAPI', 'MongoDB', 'Tailwind CSS', 'Gemini API']
+      // Start visual progress for all agents
+      const progressIntervals = {};
+      agents.forEach(agent => {
+        progressIntervals[agent.id] = simulateAgentProgress(agent.id);
       });
+
+      // Make actual API call to generate the app
+      const response = await axios.post(`${API}/generate`, {
+        prompt: prompt.trim()
+      });
+
+      if (response.data.success && response.data.project) {
+        const project = response.data.project;
+        
+        // Complete all agents with real results from backend
+        agents.forEach(agent => {
+          clearInterval(progressIntervals[agent.id]);
+          const agentResult = project.agents_results[agent.id] || {};
+          completeAgent(agent.id, agentResult);
+        });
+
+        // Set the real generated project
+        setGeneratedProject(project);
+        setCurrentStep(agents.length);
+
+      } else {
+        throw new Error('Invalid response from server');
+      }
 
     } catch (error) {
       console.error('Generation failed:', error);
+      
+      // Mark all running agents as failed
+      agents.forEach(agent => {
+        setAgentStatuses(prev => ({
+          ...prev,
+          [agent.id]: { 
+            ...prev[agent.id], 
+            status: AGENT_STATUS.ERROR, 
+            progress: 0
+          }
+        }));
+      });
+
+      // Show user-friendly error message
+      alert('App generation failed. Please check your connection and try again.');
+      
     } finally {
       setIsGenerating(false);
     }
