@@ -347,7 +347,12 @@ async def get_project(project_id: str):
         project = await db.generated_projects.find_one({"id": project_id})
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
+        # Convert ObjectId to string for JSON serialization
+        if '_id' in project:
+            project['_id'] = str(project['_id'])
         return project
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error(f"Failed to fetch project: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to fetch project")
