@@ -70,7 +70,7 @@ async def get_user_by_session_token(db: AsyncIOMotorDatabase, session_token: str
     """Get user by session token from database."""
     user_data = await db.users.find_one({
         "session_token": session_token,
-        "session_expires": {"$gt": datetime.now(timezone.utc)}
+        "session_expires": {"$gt": datetime.now(timezone.utc).isoformat()}
     })
     if user_data:
         if '_id' in user_data:
