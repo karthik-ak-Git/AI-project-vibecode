@@ -11,6 +11,7 @@ class MultiAgentAPITester:
         self.tests_run = 0
         self.tests_passed = 0
         self.auth_token = None
+        self.admin_token = None  # For admin authentication tests
         self.test_user_email = f"testuser_{int(time.time())}@example.com"
         self.test_user_password = "TestPassword123!"
         self.created_project_id = None
