@@ -62,6 +62,21 @@ class MultiAgentAPITester:
             print(f"❌ Failed - Error: {str(e)}")
             return False, {}
 
+    # System Health Tests
+    def test_system_status(self):
+        """Test system status endpoint"""
+        success, response = self.run_test("System Status", "GET", "system/status", 200)
+        
+        if success:
+            expected_keys = ['status', 'database', 'ai_service', 'version', 'timestamp']
+            for key in expected_keys:
+                if key in response:
+                    print(f"   ✅ Found {key}: {response[key]}")
+                else:
+                    print(f"   ❌ Missing {key}")
+                    
+        return success, response
+
     def test_root_endpoint(self):
         """Test the root API endpoint"""
         return self.run_test("Root API Endpoint", "GET", "", 200)
@@ -82,6 +97,140 @@ class MultiAgentAPITester:
                 else:
                     print(f"   ❌ Missing {expected} agent")
                     
+        return success, response
+
+    # Authentication System Tests
+    def test_user_registration(self):
+        """Test user registration"""
+        user_data = {
+            "email": self.test_user_email,
+            "username": f"testuser_{int(time.time())}",
+            "full_name": "Test User",
+            "password": self.test_user_password
+        }
+        
+        success, response = self.run_test(
+            "User Registration", 
+            "POST", 
+            "auth/register", 
+            200, 
+            data=user_data
+        )
+        
+        if success and response.get('success'):
+            print(f"   ✅ User registered successfully")
+            print(f"   User ID: {response.get('data', {}).get('user_id')}")
+        
+        return success, response
+
+    def test_user_login(self):
+        """Test user login and store token"""
+        login_data = {
+            "email": self.test_user_email,
+            "password": self.test_user_password
+        }
+        
+        success, response = self.run_test(
+            "User Login", 
+            "POST", 
+            "auth/login", 
+            200, 
+            data=login_data
+        )
+        
+        if success and 'access_token' in response:
+            self.auth_token = response['access_token']
+            print(f"   ✅ Login successful, token stored")
+            print(f"   Token type: {response.get('token_type')}")
+        
+        return success, response
+
+    def test_protected_endpoint(self):
+        """Test protected endpoint /auth/me"""
+        success, response = self.run_test(
+            "Protected Endpoint (/auth/me)", 
+            "GET", 
+            "auth/me", 
+            200,
+            auth_required=True
+        )
+        
+        if success:
+            print(f"   ✅ User info retrieved")
+            print(f"   Email: {response.get('email')}")
+            print(f"   Username: {response.get('username')}")
+        
+        return success, response
+
+    def test_invalid_token(self):
+        """Test with invalid token"""
+        # Temporarily set invalid token
+        original_token = self.auth_token
+        self.auth_token = "invalid_token_123"
+        
+        success, response = self.run_test(
+            "Invalid Token Test", 
+            "GET", 
+            "auth/me", 
+            401,  # Expecting unauthorized
+            auth_required=True
+        )
+        
+        # Restore original token
+        self.auth_token = original_token
+        
+        return success, response
+
+    # AI Service Integration Tests
+    def test_ai_analysis_simple(self):
+        """Test AI analysis with simple analysis type"""
+        analysis_data = {
+            "prompt": "Create a simple blog website with user authentication",
+            "analysis_type": "simple"
+        }
+        
+        success, response = self.run_test(
+            "AI Analysis - Simple", 
+            "POST", 
+            "ai/analyze", 
+            200, 
+            data=analysis_data,
+            auth_required=True,
+            timeout=45
+        )
+        
+        if success and response.get('success'):
+            print(f"   ✅ AI analysis completed")
+            data = response.get('data', {})
+            print(f"   Processing time: {data.get('processing_time', 'N/A')}s")
+            print(f"   Model used: {data.get('model_used', 'N/A')}")
+        
+        return success, response
+
+    def test_ai_analysis_comprehensive(self):
+        """Test AI analysis with comprehensive analysis type"""
+        analysis_data = {
+            "prompt": "Build a task management app with real-time collaboration and AI features",
+            "analysis_type": "comprehensive"
+        }
+        
+        success, response = self.run_test(
+            "AI Analysis - Comprehensive", 
+            "POST", 
+            "ai/analyze", 
+            200, 
+            data=analysis_data,
+            auth_required=True,
+            timeout=60
+        )
+        
+        if success and response.get('success'):
+            print(f"   ✅ Comprehensive AI analysis completed")
+            data = response.get('data', {})
+            if 'result' in data:
+                result = data['result']
+                print(f"   Analysis sections: {list(result.keys()) if isinstance(result, dict) else 'Non-dict result'}")
+        
         return success, response
 
     def test_generate_app_simple(self):
