@@ -53,11 +53,15 @@ async def create_indexes():
         await db.users.create_index("email", unique=True)
         await db.users.create_index("username", unique=True)
         await db.users.create_index("created_at")
+        await db.users.create_index("session_token")
+        await db.users.create_index("role")
+        await db.users.create_index("emergent_auth_id")
         
         # Project indexes  
         await db.generated_projects.create_index("user_id")
         await db.generated_projects.create_index("created_at")
         await db.generated_projects.create_index("name")
+        await db.generated_projects.create_index("priority")
         await db.generated_projects.create_index([("user_id", 1), ("created_at", -1)])
         
         # AI Analysis indexes
@@ -70,6 +74,19 @@ async def create_indexes():
         await db.chat_sessions.create_index("created_at")
         await db.chat_messages.create_index("session_id")
         await db.chat_messages.create_index("timestamp")
+        
+        # MCP Task indexes
+        await db.mcp_tasks.create_index("created_by")
+        await db.mcp_tasks.create_index("task_type")
+        await db.mcp_tasks.create_index("status")
+        await db.mcp_tasks.create_index("created_at")
+        await db.mcp_tasks.create_index([("created_by", 1), ("status", 1)])
+        
+        # LinkedIn Post indexes
+        await db.linkedin_posts.create_index("mcp_task_id")
+        await db.linkedin_posts.create_index("status")
+        await db.linkedin_posts.create_index("scheduled_for")
+        await db.linkedin_posts.create_index("posted_at")
         
         logger.info("Database indexes created successfully")
         
