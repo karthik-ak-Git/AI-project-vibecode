@@ -173,3 +173,188 @@ async def get_chat_history(session_id: str, limit: int = 50):
             message['_id'] = str(message['_id'])
     
     return messages
+
+# MCP Task Management Functions
+async def create_mcp_task(task_data: dict):
+    """Create a new MCP task"""
+    db = await get_database()
+    
+    # Convert datetime objects to ISO strings for MongoDB storage
+    if 'created_at' in task_data and hasattr(task_data['created_at'], 'isoformat'):
+        task_data['created_at'] = task_data['created_at'].isoformat()
+    if 'updated_at' in task_data and hasattr(task_data['updated_at'], 'isoformat'):
+        task_data['updated_at'] = task_data['updated_at'].isoformat()
+    
+    result = await db.mcp_tasks.insert_one(task_data)
+    return str(result.inserted_id)
+
+async def get_mcp_tasks(created_by: str = None, status: str = None, limit: int = 50, skip: int = 0):
+    """Get MCP tasks with optional filtering"""
+    db = await get_database()
+    
+    query = {}
+    if created_by:
+        query["created_by"] = created_by
+    if status:
+        query["status"] = status
+    
+    cursor = db.mcp_tasks.find(query)
+    cursor = cursor.sort("created_at", -1).skip(skip).limit(limit)
+    
+    tasks = await cursor.to_list(length=limit)
+    for task in tasks:
+        if '_id' in task:
+            task['_id'] = str(task['_id'])
+    
+    return tasks
+
+async def get_mcp_task_by_id(task_id: str, created_by: str = None):
+    """Get MCP task by ID with optional user validation"""
+    db = await get_database()
+    
+    query = {"id": task_id}
+    if created_by:
+        query["created_by"] = created_by
+    
+    task = await db.mcp_tasks.find_one(query)
+    if task and '_id' in task:
+        task['_id'] = str(task['_id'])
+    
+    return task
+
+async def update_mcp_task(task_id: str, update_data: dict, created_by: str = None):
+    """Update MCP task"""
+    db = await get_database()
+    
+    # Add updated timestamp
+    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    
+    query = {"id": task_id}
+    if created_by:
+        query["created_by"] = created_by
+    
+    result = await db.mcp_tasks.update_one(query, {"$set": update_data})
+    return result.modified_count > 0
+
+async def delete_mcp_task(task_id: str, created_by: str = None):
+    """Delete MCP task"""
+    db = await get_database()
+    
+    query = {"id": task_id}
+    if created_by:
+        query["created_by"] = created_by
+    
+    result = await db.mcp_tasks.delete_one(query)
+    return result.deleted_count > 0
+
+# LinkedIn Post Management Functions
+async def create_linkedin_post(post_data: dict):
+    """Create a LinkedIn post"""
+    db = await get_database()
+    
+    if 'created_at' in post_data and hasattr(post_data['created_at'], 'isoformat'):
+        post_data['created_at'] = post_data['created_at'].isoformat()
+    if 'scheduled_for' in post_data and hasattr(post_data['scheduled_for'], 'isoformat'):
+        post_data['scheduled_for'] = post_data['scheduled_for'].isoformat()
+    
+    result = await db.linkedin_posts.insert_one(post_data)
+    return str(result.inserted_id)
+
+async def get_linkedin_posts(mcp_task_id: str = None, status: str = None, limit: int = 50):
+    """Get LinkedIn posts with optional filtering"""
+    db = await get_database()
+    
+    query = {}
+    if mcp_task_id:
+        query["mcp_task_id"] = mcp_task_id
+    if status:
+        query["status"] = status
+    
+    cursor = db.linkedin_posts.find(query)
+    cursor = cursor.sort("created_at", -1).limit(limit)
+    
+    posts = await cursor.to_list(length=limit)
+    for post in posts:
+        if '_id' in post:
+            post['_id'] = str(post['_id'])
+    
+    return posts
+
+async def update_linkedin_post(post_id: str, update_data: dict):
+    """Update LinkedIn post"""
+    db = await get_database()
+    
+    if 'posted_at' in update_data and hasattr(update_data['posted_at'], 'isoformat'):
+        update_data['posted_at'] = update_data['posted_at'].isoformat()
+    
+    result = await db.linkedin_posts.update_one(
+        {"id": post_id}, 
+        {"$set": update_data}
+    )
+    return result.modified_count > 0
+
+# Admin Statistics Functions
+async def get_admin_stats():
+    """Get admin dashboard statistics"""
+    db = await get_database()
+    
+    # Count totals
+    total_users = await db.users.count_documents({})
+    total_projects = await db.generated_projects.count_documents({})
+    total_mcp_tasks = await db.mcp_tasks.count_documents({})
+    active_mcp_tasks = await db.mcp_tasks.count_documents({"status": "active"})
+    
+    # Get recent activity (last 10 projects and tasks)
+    recent_projects = await db.generated_projects.find({}).sort("created_at", -1).limit(5).to_list(5)
+    recent_tasks = await db.mcp_tasks.find({}).sort("created_at", -1).limit(5).to_list(5)
+    
+    recent_activity = []
+    
+    for project in recent_projects:
+        recent_activity.append({
+            "type": "project",
+            "title": f"Project '{project.get('name')}' created",
+            "timestamp": project.get('created_at'),
+            "user_id": project.get('user_id')
+        })
+    
+    for task in recent_tasks:
+        recent_activity.append({
+            "type": "mcp_task",
+            "title": f"MCP Task '{task.get('name')}' created",
+            "timestamp": task.get('created_at'),
+            "user_id": task.get('created_by')
+        })
+    
+    # Sort by timestamp
+    recent_activity.sort(key=lambda x: x['timestamp'], reverse=True)
+    
+    return {
+        "total_users": total_users,
+        "total_projects": total_projects,
+        "total_mcp_tasks": total_mcp_tasks,
+        "active_mcp_tasks": active_mcp_tasks,
+        "recent_activity": recent_activity[:10]
+    }
+
+async def get_all_users(limit: int = 50, skip: int = 0):
+    """Get all users for admin management"""
+    db = await get_database()
+    
+    cursor = db.users.find({})
+    cursor = cursor.sort("created_at", -1).skip(skip).limit(limit)
+    
+    users = await cursor.to_list(length=limit)
+    total_count = await db.users.count_documents({})
+    
+    for user in users:
+        if '_id' in user:
+            user['_id'] = str(user['_id'])
+        # Don't include sensitive data
+        user.pop('hashed_password', None)
+        user.pop('session_token', None)
+    
+    return {
+        "users": users,
+        "total_count": total_count
+    }
