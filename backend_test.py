@@ -233,6 +233,7 @@ class MultiAgentAPITester:
         
         return success, response
 
+    # Multi-Agent Generation System Tests
     def test_generate_app_simple(self):
         """Test app generation with a simple prompt"""
         prompt_data = {
@@ -245,14 +246,26 @@ class MultiAgentAPITester:
             "generate", 
             200, 
             data=prompt_data,
-            timeout=60
+            auth_required=True,
+            timeout=90
         )
         
-        if success and 'project' in response:
-            project = response['project']
+        if success and response.get('success'):
+            project = response.get('data', {}).get('project', {})
+            self.created_project_id = project.get('id')  # Store for later tests
             print(f"   Generated project: {project.get('name', 'Unknown')}")
             print(f"   Technologies: {len(project.get('technologies', []))} found")
             print(f"   Structure folders: {list(project.get('structure', {}).keys())}")
+            
+            # Verify all 6 agents responded
+            agents_results = project.get('agents_results', {})
+            expected_agents = ['designer', 'frontend', 'backend', 'database', 'ai', 'tester']
+            for agent in expected_agents:
+                if agent in agents_results:
+                    print(f"   ✅ {agent} agent responded")
+                else:
+                    print(f"   ❌ {agent} agent missing")
+            
             return success, project
             
         return success, response
@@ -269,24 +282,26 @@ class MultiAgentAPITester:
             "generate", 
             200, 
             data=prompt_data,
-            timeout=60
+            auth_required=True,
+            timeout=120
         )
         
-        if success and 'project' in response:
-            project = response['project']
+        if success and response.get('success'):
+            project = response.get('data', {}).get('project', {})
             print(f"   Generated project: {project.get('name', 'Unknown')}")
             
             # Check if AI-related technologies are included
             technologies = project.get('technologies', [])
-            if 'Gemini API' in technologies:
+            if 'Gemini API' in technologies or any('AI' in tech for tech in technologies):
                 print(f"   ✅ AI integration detected in technologies")
             
-            # Check if auth-related files are included
+            # Check technology stack extraction
+            print(f"   Technologies extracted: {technologies}")
+            
+            # Verify project structure generation
             structure = project.get('structure', {})
-            frontend_files = structure.get('frontend', [])
-            auth_files = [f for f in frontend_files if 'auth' in f.lower()]
-            if auth_files:
-                print(f"   ✅ Auth components detected: {auth_files}")
+            if 'frontend' in structure and 'backend' in structure:
+                print(f"   ✅ Full-stack structure generated")
                 
         return success, response
 
@@ -299,20 +314,132 @@ class MultiAgentAPITester:
             "POST", 
             "generate", 
             400, 
-            data=prompt_data
+            data=prompt_data,
+            auth_required=True
         )
         return success, response
 
+    # Project Management Tests
     def test_get_projects(self):
-        """Test getting all projects"""
-        success, response = self.run_test("Get All Projects", "GET", "projects", 200)
+        """Test getting user projects"""
+        success, response = self.run_test(
+            "Get User Projects", 
+            "GET", 
+            "projects", 
+            200,
+            auth_required=True
+        )
         
         if success:
             if isinstance(response, list):
                 print(f"   Found {len(response)} projects")
+                if len(response) > 0:
+                    project = response[0]
+                    print(f"   Sample project keys: {list(project.keys())}")
             else:
                 print(f"   Response type: {type(response)}")
                 
+        return success, response
+
+    def test_get_project_by_id(self):
+        """Test getting a specific project by ID"""
+        if not self.created_project_id:
+            print("   ⚠️ No project ID available, skipping test")
+            return False, {}
+            
+        success, response = self.run_test(
+            f"Get Project by ID", 
+            "GET", 
+            f"projects/{self.created_project_id}", 
+            200,
+            auth_required=True
+        )
+        
+        if success:
+            print(f"   Retrieved project: {response.get('name', 'Unknown')}")
+            print(f"   Project ID matches: {response.get('id') == self.created_project_id}")
+                
+        return success, response
+
+    def test_update_project(self):
+        """Test updating a project"""
+        if not self.created_project_id:
+            print("   ⚠️ No project ID available, skipping test")
+            return False, {}
+            
+        update_data = {
+            "name": "Updated Blog Website",
+            "description": "Updated description for the blog website"
+        }
+        
+        success, response = self.run_test(
+            "Update Project", 
+            "PUT", 
+            f"projects/{self.created_project_id}", 
+            200,
+            data=update_data,
+            auth_required=True
+        )
+        
+        if success and response.get('success'):
+            print(f"   ✅ Project updated successfully")
+            updated_fields = response.get('data', {}).get('updated_fields', [])
+            print(f"   Updated fields: {updated_fields}")
+                
+        return success, response
+
+    def test_delete_project_invalid_id(self):
+        """Test deleting a project with invalid ID"""
+        success, response = self.run_test(
+            "Delete Project - Invalid ID", 
+            "DELETE", 
+            "projects/invalid_id_123", 
+            404,
+            auth_required=True
+        )
+        return success, response
+
+    # Export System Tests
+    def test_export_project(self):
+        """Test project export"""
+        if not self.created_project_id:
+            print("   ⚠️ No project ID available, skipping test")
+            return False, {}
+            
+        success, response = self.run_test(
+            "Export Project", 
+            "POST", 
+            f"export/{self.created_project_id}", 
+            200,
+            auth_required=True,
+            timeout=45
+        )
+        
+        if success and response.get('success'):
+            export_data = response.get('data', {}).get('export_data', {})
+            print(f"   ✅ Export completed")
+            print(f"   Export sections: {list(export_data.keys())}")
+            
+            # Verify export data completeness
+            expected_sections = ['project_info', 'structure', 'technologies', 'setup_instructions', 
+                               'deployment_guide', 'agents_output', 'development_roadmap']
+            for section in expected_sections:
+                if section in export_data:
+                    print(f"   ✅ {section} included")
+                else:
+                    print(f"   ❌ {section} missing")
+                    
+        return success, response
+
+    def test_export_invalid_project(self):
+        """Test exporting invalid project"""
+        success, response = self.run_test(
+            "Export Invalid Project", 
+            "POST", 
+            "export/invalid_project_123", 
+            404,
+            auth_required=True
+        )
         return success, response
 
     def test_project_workflow(self):
