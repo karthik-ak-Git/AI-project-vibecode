@@ -104,69 +104,40 @@ const Home = () => {
     setAgentStatuses(initialStatuses);
   }, []);
 
-  const simulateAgentExecution = async (agentId, delay = 2000) => {
+  const simulateAgentProgress = (agentId) => {
     // Start agent
     setAgentStatuses(prev => ({
       ...prev,
       [agentId]: { ...prev[agentId], status: AGENT_STATUS.RUNNING, progress: 0 }
     }));
 
-    // Simulate progress
-    for (let progress = 0; progress <= 100; progress += 20) {
-      await new Promise(resolve => setTimeout(resolve, delay / 5));
-      setAgentStatuses(prev => ({
-        ...prev,
-        [agentId]: { ...prev[agentId], progress }
-      }));
-    }
+    // Simulate progress visually while API processes
+    const progressInterval = setInterval(() => {
+      setAgentStatuses(prev => {
+        const currentProgress = prev[agentId]?.progress || 0;
+        if (currentProgress < 90) {
+          return {
+            ...prev,
+            [agentId]: { ...prev[agentId], progress: currentProgress + 10 }
+          };
+        }
+        return prev;
+      });
+    }, 200);
 
-    // Complete agent
-    const mockResult = generateMockResult(agentId);
+    return progressInterval;
+  };
+
+  const completeAgent = (agentId, result) => {
     setAgentStatuses(prev => ({
       ...prev,
       [agentId]: { 
         ...prev[agentId], 
         status: AGENT_STATUS.COMPLETED, 
         progress: 100,
-        result: mockResult
+        result: result
       }
     }));
-  };
-
-  const generateMockResult = (agentId) => {
-    const results = {
-      designer: {
-        components: ['Header', 'Hero', 'Features', 'Footer'],
-        styles: 'Tailwind CSS with modern color palette',
-        layout: 'Responsive grid-based design'
-      },
-      frontend: {
-        files: ['App.js', 'components/Header.js', 'pages/Home.js'],
-        framework: 'React 18 with hooks',
-        features: ['State management', 'Routing', 'API integration']
-      },
-      backend: {
-        endpoints: ['/api/users', '/api/projects', '/api/auth'],
-        framework: 'FastAPI',
-        features: ['Authentication', 'CRUD operations', 'Validation']
-      },
-      database: {
-        collections: ['users', 'projects', 'sessions'],
-        schema: 'MongoDB with Pydantic models',
-        indexes: 'Optimized for queries'
-      },
-      ai: {
-        services: ['Text generation', 'Data analysis'],
-        provider: 'Gemini API',
-        endpoints: ['/api/ai/generate', '/api/ai/analyze']
-      },
-      tester: {
-        tests: ['Unit tests', 'Integration tests', 'E2E tests'],
-        coverage: '95%',
-        status: 'All tests passing'
-      }
-    };
-    return results[agentId] || {};
   };
 
   const handleGenerate = async () => {
