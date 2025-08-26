@@ -95,15 +95,26 @@ export const AuthProvider = ({ children }) => {
       });
 
       if (response.data.access_token) {
-        // Check user info after login
-        await checkAuthStatus();
-        return { success: true };
+        // Session cookie is automatically set by the backend
+        // Now check user info to update the auth state
+        const userInfoResponse = await axios.get(`${API}/auth/me`);
+        if (userInfoResponse.data.success) {
+          setUser(userInfoResponse.data.data);
+          setIsAuthenticated(true);
+          return { success: true };
+        } else {
+          throw new Error('Failed to get user info after login');
+        }
+      } else {
+        throw new Error('No access token received');
       }
     } catch (error) {
       console.error('Login failed:', error);
+      setUser(null);
+      setIsAuthenticated(false);
       return {
         success: false,
-        error: error.response?.data?.detail || 'Login failed'
+        error: error.response?.data?.detail || error.message || 'Login failed'
       };
     }
   };
