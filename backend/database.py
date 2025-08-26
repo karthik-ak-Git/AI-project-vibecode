@@ -40,7 +40,7 @@ async def close_mongo_connection():
 
 async def get_database() -> AsyncIOMotorDatabase:
     """Get database instance"""
-    if not database.database:
+    if database.database is None:
         await connect_to_mongo()
     return database.database
 
