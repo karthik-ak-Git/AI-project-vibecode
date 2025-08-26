@@ -19,8 +19,29 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
-  // Configure axios to include credentials
+  // Configure axios to include credentials and set up interceptors
   axios.defaults.withCredentials = true;
+  
+  // Set up request interceptor to include auth headers
+  axios.interceptors.request.use(
+    (config) => {
+      return config;
+    },
+    (error) => Promise.reject(error)
+  );
+
+  // Set up response interceptor to handle auth errors
+  axios.interceptors.response.use(
+    (response) => response,
+    async (error) => {
+      if (error.response?.status === 401) {
+        // If unauthorized, clear auth state
+        setUser(null);
+        setIsAuthenticated(false);
+      }
+      return Promise.reject(error);
+    }
+  );
 
   const checkAuthStatus = async () => {
     try {
