@@ -410,7 +410,7 @@ const Home = () => {
                       <FileCode className="h-5 w-5 mr-2" />
                       Generated Project: {generatedProject.name}
                     </div>
-                    <Button variant="outline" size="sm">
+                    <Button variant="outline" size="sm" onClick={() => handleExport(generatedProject.id)}>
                       <Download className="h-4 w-4 mr-2" />
                       Export
                     </Button>
