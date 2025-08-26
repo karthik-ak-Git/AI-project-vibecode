@@ -331,6 +331,10 @@ async def get_projects():
     """Get all generated projects"""
     try:
         projects = await db.generated_projects.find().to_list(100)
+        # Convert ObjectId to string for JSON serialization
+        for project in projects:
+            if '_id' in project:
+                project['_id'] = str(project['_id'])
         return projects
     except Exception as e:
         logging.error(f"Failed to fetch projects: {str(e)}")
