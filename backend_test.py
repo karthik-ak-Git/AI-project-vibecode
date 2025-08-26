@@ -792,35 +792,47 @@ def main():
     tester.test_protected_endpoint()
     tester.test_invalid_token()
     
-    # Phase 3: AI Service Integration Tests
-    print(f"\n🤖 Phase 3: AI Service Integration Tests")
+    # Phase 3: Admin Authentication System Tests
+    print(f"\n👑 Phase 3: Admin Authentication System Tests")
+    print("-" * 40)
+    tester.test_admin_user_login()
+    tester.test_admin_user_info()
+    tester.test_admin_stats_endpoint()
+    tester.test_admin_users_endpoint()
+    tester.test_admin_mcp_tasks_endpoint()
+    tester.test_admin_mcp_task_types_endpoint()
+    tester.test_regular_user_admin_access()
+    tester.test_admin_authentication_flow()
+    
+    # Phase 4: AI Service Integration Tests
+    print(f"\n🤖 Phase 4: AI Service Integration Tests")
     print("-" * 40)
     tester.test_ai_analysis_simple()
     tester.test_ai_analysis_comprehensive()
     
-    # Phase 4: Multi-Agent Generation System Tests
-    print(f"\n⚙️ Phase 4: Multi-Agent Generation System Tests")
+    # Phase 5: Multi-Agent Generation System Tests
+    print(f"\n⚙️ Phase 5: Multi-Agent Generation System Tests")
     print("-" * 40)
     tester.test_generate_app_simple()
     tester.test_generate_app_complex()
     tester.test_generate_empty_prompt()
     
-    # Phase 5: Project Management Tests
-    print(f"\n📁 Phase 5: Project Management Tests")
+    # Phase 6: Project Management Tests
+    print(f"\n📁 Phase 6: Project Management Tests")
     print("-" * 40)
     tester.test_get_projects()
     tester.test_get_project_by_id()
     tester.test_update_project()
     tester.test_delete_project_invalid_id()
     
-    # Phase 6: Export System Tests
-    print(f"\n📤 Phase 6: Export System Tests")
+    # Phase 7: Export System Tests
+    print(f"\n📤 Phase 7: Export System Tests")
     print("-" * 40)
     tester.test_export_project()
     tester.test_export_invalid_project()
     
-    # Phase 7: Complete Workflow Test
-    print(f"\n🔄 Phase 7: Complete Workflow Test")
+    # Phase 8: Complete Workflow Test
+    print(f"\n🔄 Phase 8: Complete Workflow Test")
     print("-" * 40)
     # Note: This will create another project, but that's fine for comprehensive testing
     workflow_success = tester.test_project_workflow()
