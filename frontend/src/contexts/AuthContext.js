@@ -125,14 +125,16 @@ export const AuthProvider = ({ children }) => {
       
       if (response.data.success) {
         // Auto-login after registration
-        await login(userData.email, userData.password);
-        return { success: true };
+        const loginResult = await login(userData.email, userData.password);
+        return loginResult;
+      } else {
+        throw new Error('Registration failed');
       }
     } catch (error) {
       console.error('Registration failed:', error);
       return {
         success: false,
-        error: error.response?.data?.detail || 'Registration failed'
+        error: error.response?.data?.detail || error.message || 'Registration failed'
       };
     }
   };
