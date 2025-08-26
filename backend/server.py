@@ -364,6 +364,10 @@ async def export_project(project_id: str):
         project = await db.generated_projects.find_one({"id": project_id})
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Convert ObjectId to string if present
+        if '_id' in project:
+            project['_id'] = str(project['_id'])
             
         # In a real implementation, this would generate actual code files
         # For now, return the project structure and guidelines
@@ -389,6 +393,8 @@ async def export_project(project_id: str):
             "message": "Project exported successfully"
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error(f"Project export failed: {str(e)}")
         raise HTTPException(status_code=500, detail="Project export failed")
