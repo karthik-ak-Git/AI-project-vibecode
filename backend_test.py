@@ -2,6 +2,7 @@ import requests
 import sys
 import json
 from datetime import datetime
+import time
 
 class MultiAgentAPITester:
     def __init__(self, base_url="https://fastapi-agents.preview.emergentagent.com"):
@@ -9,6 +10,10 @@ class MultiAgentAPITester:
         self.api_url = f"{base_url}/api"
         self.tests_run = 0
         self.tests_passed = 0
+        self.auth_token = None
+        self.test_user_email = f"testuser_{int(time.time())}@example.com"
+        self.test_user_password = "TestPassword123!"
+        self.created_project_id = None
 
     def run_test(self, name, method, endpoint, expected_status, data=None, timeout=30):
         """Run a single API test"""
