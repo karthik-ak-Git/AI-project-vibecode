@@ -261,10 +261,11 @@ async def get_current_user(
 
 async def get_current_active_user(
     request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: AsyncIOMotorDatabase = Depends(get_database)
 ) -> User:
     """Get current active user."""
-    current_user = await get_current_user_from_cookie_or_header(request, None, db)
+    current_user = await get_current_user_from_cookie_or_header(request, credentials, db)
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
