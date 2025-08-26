@@ -250,7 +250,8 @@ metadata:
 test_plan:
   current_focus:
     - "Main App Generation Interface"
-  stuck_tasks: []
+  stuck_tasks:
+    - "Main App Generation Interface"
   test_all: false
   test_priority: "high_first"
 
