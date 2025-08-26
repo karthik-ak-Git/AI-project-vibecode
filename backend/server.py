@@ -14,6 +14,7 @@ import time
 # Import our custom modules
 from models import *
 from auth import *
+from auth import security  # Import security instance
 from ai_service import AIService
 from database import (
     connect_to_mongo, close_mongo_connection, get_database, get_user_projects, get_project_by_id,
