@@ -489,6 +489,288 @@ class MultiAgentAPITester:
             else:
                 print("   ⚠️ Failed to delete test project")
 
+    # ADMIN AUTHENTICATION SYSTEM TESTS
+    def test_admin_user_login(self):
+        """Test admin user login with specific credentials"""
+        admin_login_data = {
+            "email": "kartik986340@gmail.com",
+            "password": "ak-047-ak"
+        }
+        
+        success, response = self.run_test(
+            "Admin User Login", 
+            "POST", 
+            "auth/login", 
+            200, 
+            data=admin_login_data
+        )
+        
+        if success and 'access_token' in response:
+            # Store admin token separately
+            self.admin_token = response['access_token']
+            print(f"   ✅ Admin login successful, token stored")
+            print(f"   Token type: {response.get('token_type')}")
+            return True, response
+        else:
+            print(f"   ❌ Admin login failed")
+            return False, response
+
+    def test_admin_user_info(self):
+        """Test GET /api/auth/me with admin token to verify admin role"""
+        if not hasattr(self, 'admin_token') or not self.admin_token:
+            print("   ⚠️ No admin token available, skipping test")
+            return False, {}
+            
+        # Temporarily use admin token
+        original_token = self.auth_token
+        self.auth_token = self.admin_token
+        
+        success, response = self.run_test(
+            "Admin User Info (/auth/me)", 
+            "GET", 
+            "auth/me", 
+            200,
+            auth_required=True
+        )
+        
+        # Restore original token
+        self.auth_token = original_token
+        
+        if success and response.get('success'):
+            user_data = response.get('data', {})
+            user_role = user_data.get('role')
+            user_email = user_data.get('email')
+            
+            print(f"   ✅ Admin user info retrieved")
+            print(f"   Email: {user_email}")
+            print(f"   Role: {user_role}")
+            
+            # Verify admin role
+            if user_role == "admin":
+                print(f"   ✅ Admin role verified")
+                return True, response
+            else:
+                print(f"   ❌ Expected admin role, got: {user_role}")
+                return False, response
+        
+        return success, response
+
+    def test_admin_stats_endpoint(self):
+        """Test GET /api/admin/stats (admin-only endpoint)"""
+        if not hasattr(self, 'admin_token') or not self.admin_token:
+            print("   ⚠️ No admin token available, skipping test")
+            return False, {}
+            
+        # Temporarily use admin token
+        original_token = self.auth_token
+        self.auth_token = self.admin_token
+        
+        success, response = self.run_test(
+            "Admin Stats Endpoint", 
+            "GET", 
+            "admin/stats", 
+            200,
+            auth_required=True
+        )
+        
+        # Restore original token
+        self.auth_token = original_token
+        
+        if success and response.get('success'):
+            stats_data = response.get('data', {})
+            print(f"   ✅ Admin stats retrieved")
+            print(f"   Stats keys: {list(stats_data.keys())}")
+            
+            # Check for expected stats fields
+            expected_fields = ['total_users', 'total_projects']
+            for field in expected_fields:
+                if field in stats_data:
+                    print(f"   ✅ Found {field}: {stats_data[field]}")
+                else:
+                    print(f"   ⚠️ Missing {field}")
+        
+        return success, response
+
+    def test_admin_users_endpoint(self):
+        """Test GET /api/admin/users (admin-only endpoint)"""
+        if not hasattr(self, 'admin_token') or not self.admin_token:
+            print("   ⚠️ No admin token available, skipping test")
+            return False, {}
+            
+        # Temporarily use admin token
+        original_token = self.auth_token
+        self.auth_token = self.admin_token
+        
+        success, response = self.run_test(
+            "Admin Users Endpoint", 
+            "GET", 
+            "admin/users", 
+            200,
+            auth_required=True
+        )
+        
+        # Restore original token
+        self.auth_token = original_token
+        
+        if success and response.get('success'):
+            users_data = response.get('data', {})
+            print(f"   ✅ Admin users list retrieved")
+            
+            if 'users' in users_data:
+                users_list = users_data['users']
+                print(f"   Found {len(users_list)} users")
+                
+                # Check if admin user is in the list
+                admin_found = any(user.get('email') == 'kartik986340@gmail.com' for user in users_list)
+                if admin_found:
+                    print(f"   ✅ Admin user found in users list")
+                else:
+                    print(f"   ⚠️ Admin user not found in users list")
+        
+        return success, response
+
+    def test_admin_mcp_tasks_endpoint(self):
+        """Test GET /api/admin/mcp/tasks (admin-only endpoint)"""
+        if not hasattr(self, 'admin_token') or not self.admin_token:
+            print("   ⚠️ No admin token available, skipping test")
+            return False, {}
+            
+        # Temporarily use admin token
+        original_token = self.auth_token
+        self.auth_token = self.admin_token
+        
+        success, response = self.run_test(
+            "Admin MCP Tasks Endpoint", 
+            "GET", 
+            "admin/mcp/tasks", 
+            200,
+            auth_required=True
+        )
+        
+        # Restore original token
+        self.auth_token = original_token
+        
+        if success and response.get('success'):
+            tasks_data = response.get('data', {})
+            print(f"   ✅ Admin MCP tasks retrieved")
+            
+            if 'tasks' in tasks_data:
+                tasks_list = tasks_data['tasks']
+                print(f"   Found {len(tasks_list)} MCP tasks")
+        
+        return success, response
+
+    def test_admin_mcp_task_types_endpoint(self):
+        """Test GET /api/admin/mcp/task-types (admin-only endpoint)"""
+        if not hasattr(self, 'admin_token') or not self.admin_token:
+            print("   ⚠️ No admin token available, skipping test")
+            return False, {}
+            
+        # Temporarily use admin token
+        original_token = self.auth_token
+        self.auth_token = self.admin_token
+        
+        success, response = self.run_test(
+            "Admin MCP Task Types Endpoint", 
+            "GET", 
+            "admin/mcp/task-types", 
+            200,
+            auth_required=True
+        )
+        
+        # Restore original token
+        self.auth_token = original_token
+        
+        if success and response.get('success'):
+            task_types_data = response.get('data', {})
+            print(f"   ✅ Admin MCP task types retrieved")
+            
+            if 'task_types' in task_types_data:
+                task_types_list = task_types_data['task_types']
+                print(f"   Found {len(task_types_list)} task types")
+                
+                # Check for expected task types
+                expected_types = ['linkedin_post', 'email_campaign', 'social_media_post']
+                found_types = [task_type.get('id') for task_type in task_types_list]
+                
+                for expected_type in expected_types:
+                    if expected_type in found_types:
+                        print(f"   ✅ Found {expected_type} task type")
+                    else:
+                        print(f"   ⚠️ Missing {expected_type} task type")
+        
+        return success, response
+
+    def test_regular_user_admin_access(self):
+        """Test that regular user cannot access admin endpoints"""
+        if not self.auth_token:
+            print("   ⚠️ No regular user token available, skipping test")
+            return False, {}
+        
+        print(f"\n🔒 Testing Regular User Admin Access Restrictions...")
+        
+        # Test admin stats with regular user token (should fail)
+        success, response = self.run_test(
+            "Regular User -> Admin Stats (Should Fail)", 
+            "GET", 
+            "admin/stats", 
+            403,  # Expecting forbidden
+            auth_required=True
+        )
+        
+        if success:
+            print(f"   ✅ Regular user correctly denied admin stats access")
+        
+        # Test admin users with regular user token (should fail)
+        success2, response2 = self.run_test(
+            "Regular User -> Admin Users (Should Fail)", 
+            "GET", 
+            "admin/users", 
+            403,  # Expecting forbidden
+            auth_required=True
+        )
+        
+        if success2:
+            print(f"   ✅ Regular user correctly denied admin users access")
+        
+        return success and success2, {}
+
+    def test_admin_authentication_flow(self):
+        """Test complete admin authentication flow"""
+        print(f"\n🔄 Testing Complete Admin Authentication Flow...")
+        
+        # Step 1: Admin login
+        login_success, login_response = self.test_admin_user_login()
+        if not login_success:
+            print("❌ Admin authentication flow failed at login")
+            return False
+        
+        # Step 2: Get admin user info
+        info_success, info_response = self.test_admin_user_info()
+        if not info_success:
+            print("❌ Admin authentication flow failed at user info")
+            return False
+        
+        # Step 3: Access admin resources
+        stats_success, _ = self.test_admin_stats_endpoint()
+        users_success, _ = self.test_admin_users_endpoint()
+        tasks_success, _ = self.test_admin_mcp_tasks_endpoint()
+        task_types_success, _ = self.test_admin_mcp_task_types_endpoint()
+        
+        admin_resources_success = stats_success and users_success and tasks_success and task_types_success
+        
+        if not admin_resources_success:
+            print("❌ Admin authentication flow failed at admin resources access")
+            return False
+        
+        # Step 4: Verify regular user restrictions
+        restrictions_success, _ = self.test_regular_user_admin_access()
+        
+        flow_success = login_success and info_success and admin_resources_success and restrictions_success
+        print(f"   Admin Authentication Flow Result: {'✅ Success' if flow_success else '❌ Failed'}")
+        
+        return flow_success
+
 def main():
     print("🚀 Starting Comprehensive Multi-Agent Platform API Tests")
     print("=" * 70)
