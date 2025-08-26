@@ -15,20 +15,30 @@ class MultiAgentAPITester:
         self.test_user_password = "TestPassword123!"
         self.created_project_id = None
 
-    def run_test(self, name, method, endpoint, expected_status, data=None, timeout=30):
+    def run_test(self, name, method, endpoint, expected_status, data=None, timeout=30, auth_required=False):
         """Run a single API test"""
         url = f"{self.api_url}/{endpoint}" if endpoint else f"{self.api_url}"
         headers = {'Content-Type': 'application/json'}
+        
+        # Add authorization header if required and token is available
+        if auth_required and self.auth_token:
+            headers['Authorization'] = f'Bearer {self.auth_token}'
 
         self.tests_run += 1
         print(f"\n🔍 Testing {name}...")
         print(f"   URL: {url}")
+        if auth_required:
+            print(f"   Auth: {'✅ Token provided' if self.auth_token else '❌ No token'}")
         
         try:
             if method == 'GET':
                 response = requests.get(url, headers=headers, timeout=timeout)
             elif method == 'POST':
                 response = requests.post(url, json=data, headers=headers, timeout=timeout)
+            elif method == 'PUT':
+                response = requests.put(url, json=data, headers=headers, timeout=timeout)
+            elif method == 'DELETE':
+                response = requests.delete(url, headers=headers, timeout=timeout)
 
             success = response.status_code == expected_status
             if success:
