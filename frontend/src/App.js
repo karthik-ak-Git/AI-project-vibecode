@@ -212,6 +212,34 @@ const Home = () => {
     }
   };
 
+  const handleExport = async (projectId) => {
+    try {
+      const response = await axios.post(`${API}/export/${projectId}`);
+      
+      if (response.data.success && response.data.export_data) {
+        const exportData = response.data.export_data;
+        
+        // Create a downloadable JSON file with the export data
+        const dataStr = JSON.stringify(exportData, null, 2);
+        const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+        
+        const exportFileDefaultName = `${exportData.project_name}-export.json`;
+        
+        const linkElement = document.createElement('a');
+        linkElement.setAttribute('href', dataUri);
+        linkElement.setAttribute('download', exportFileDefaultName);
+        linkElement.click();
+        
+        alert('Project exported successfully!');
+      } else {
+        throw new Error('Export failed');
+      }
+    } catch (error) {
+      console.error('Export failed:', error);
+      alert('Export failed. Please try again.');
+    }
+  };
+
   const extractProjectName = (prompt) => {
     const words = prompt.toLowerCase().split(' ');
     const appWords = words.filter(word => 
