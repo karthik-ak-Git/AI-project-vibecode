@@ -136,10 +136,11 @@ async def get_db() -> AsyncIOMotorDatabase:
 
 async def get_current_user_with_db(
     request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: AsyncIOMotorDatabase = Depends(get_db)
 ) -> User:
     """Get current user with database dependency"""
-    return await get_current_user_from_cookie_or_header(request, None, db)
+    return await get_current_user_from_cookie_or_header(request, credentials, db)
 
 # Enhanced Authentication Routes
 @api_router.post("/auth/register", response_model=APIResponse)
