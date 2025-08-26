@@ -102,7 +102,7 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: Complete the backend and AI service integrations of a multi-agent platform, ensuring it is fully functional, scalable, and production-ready. Finalize all FastAPI endpoints, integrate AI services, implement testing & validation, provide documentation, and ensure the system is export-ready for local development.
+user_problem_statement: Complete the frontend of a multi-agent platform with special admin features and ensure everything is secure and fully functional. The system should have user authentication with Google Auth, admin access for kartik986340@gmail.com, separate dashboards for users and admin, MCP automation task management, project management, and export functionality.
 
 backend:
   - task: "Authentication System (JWT)"
